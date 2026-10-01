@@ -14,12 +14,14 @@ from html import unescape
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-STATE_FILE = Path(os.getenv("STATE_FILE") or Path(__file__).with_name("processed.json"))
+import folders  # noqa: E402  (après load_dotenv)
+import jira_api  # noqa: E402
+import state as st  # noqa: E402
+
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "0"))  # secondes ; 0 = un seul passage
 MAX_BODY = 8000
 MAX_ATTACHMENT = 10 * 1024 * 1024  # limite Jira par défaut
@@ -111,21 +113,8 @@ def _attachments(msg: email.message.Message) -> list[dict]:
     return files
 
 
-def attach_to_issue(issue_key: str, files: list[dict]) -> None:
-    auth = (os.environ["JIRA_USERNAME"], os.environ["JIRA_TOKEN"])
-    resp = requests.post(
-        f"{os.environ['JIRA_URL'].rstrip('/')}/rest/api/3/issue/{issue_key}/attachments",
-        auth=auth,
-        headers={"X-Atlassian-Token": "no-check"},
-        files=[("file", (f["name"], f["data"], f["type"])) for f in files],
-        timeout=120,
-    )
-    resp.raise_for_status()
-    print(f"{len(files)} pièce(s) jointe(s) ajoutée(s) à {issue_key}")
-
-
 def fetch_unseen() -> list[dict]:
-    done = set(json.loads(STATE_FILE.read_text())) if STATE_FILE.exists() else set()
+    done = set(st.load())
     mails = []
     with imaplib.IMAP4_SSL(os.environ["IMAP_HOST"], int(os.environ["IMAP_PORT"])) as imap:
         imap.login(os.environ["MAIL_USER"], os.environ["MAIL_PASSWORD"])
@@ -148,9 +137,10 @@ def fetch_unseen() -> list[dict]:
     return mails
 
 
-def mark_done(mail_id: str) -> None:
-    done = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else []
-    STATE_FILE.write_text(json.dumps(done + [mail_id], indent=2))
+def mark_done(mail_id: str, issue_key: str | None) -> None:
+    state = st.load()
+    state[mail_id] = {"issue_key": issue_key, "status": None}
+    st.save(state)
 
 
 async def process(mail: dict) -> str:
@@ -189,15 +179,19 @@ async def main() -> None:
         print(f"\n--- {mail['subject']} ({mail['from']})")
         result = await process(mail)
         print(result)
-        if not DRY_RUN and mail["attachments"]:
+        try:
+            verdict = json.loads(result.strip().splitlines()[-1])
+        except Exception:
+            verdict = {}
+        issue_key = verdict.get("issue_key")
+        if not DRY_RUN and mail["attachments"] and verdict.get("create") and issue_key:
             try:
-                verdict = json.loads(result.strip().splitlines()[-1])
-                if verdict.get("create") and verdict.get("issue_key"):
-                    attach_to_issue(verdict["issue_key"], mail["attachments"])
+                jira_api.attach_to_issue(issue_key, mail["attachments"])
             except Exception as exc:  # le ticket existe : ne pas le recréer au prochain passage
                 print(f"Pièces jointes non ajoutées : {exc!r}")
         if not DRY_RUN:
-            mark_done(mail["id"])
+            mark_done(mail["id"], issue_key)
+    folders.sync(DRY_RUN)
 
 
 if __name__ == "__main__":
