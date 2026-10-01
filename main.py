@@ -20,6 +20,7 @@ load_dotenv()
 
 import folders  # noqa: E402  (après load_dotenv)
 import jira_api  # noqa: E402
+import jira_to_mail  # noqa: E402
 import state as st  # noqa: E402
 
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "0"))  # secondes ; 0 = un seul passage
@@ -138,8 +139,14 @@ def fetch_unseen() -> list[dict]:
 
 
 def mark_done(mail_id: str, issue_key: str | None) -> None:
+    status = None
+    if issue_key:  # statut actuel du ticket, pour détecter ensuite ses changements dans Jira
+        try:
+            status = jira_api.get_statuses([issue_key]).get(issue_key)
+        except Exception:
+            status = "Nouvelle demande"
     state = st.load()
-    state[mail_id] = {"issue_key": issue_key, "status": None}
+    state[mail_id] = {"issue_key": issue_key, "status": status}
     st.save(state)
 
 
@@ -191,7 +198,8 @@ async def main() -> None:
                 print(f"Pièces jointes non ajoutées : {exc!r}")
         if not DRY_RUN:
             mark_done(mail["id"], issue_key)
-    folders.sync(DRY_RUN)
+    folders.sync(DRY_RUN)       # mail -> Jira
+    jira_to_mail.sync(DRY_RUN)  # Jira -> mail
 
 
 if __name__ == "__main__":

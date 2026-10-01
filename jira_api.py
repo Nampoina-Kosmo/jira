@@ -24,6 +24,34 @@ def attach_to_issue(issue_key: str, files: list[dict]) -> None:
     print(f"{len(files)} pièce(s) jointe(s) ajoutée(s) à {issue_key}")
 
 
+def get_statuses(issue_keys: list[str]) -> dict[str, str]:
+    """{clé: nom du statut} pour les tickets demandés (les tickets supprimés sont absents)."""
+    statuses: dict[str, str] = {}
+    for i in range(0, len(issue_keys), 50):
+        jql = "key in (" + ",".join(issue_keys[i:i + 50]) + ")"
+        token = None
+        while True:
+            params = {"jql": jql, "fields": "status", "maxResults": 100}
+            if token:
+                params["nextPageToken"] = token
+            resp = requests.get(f"{_base()}/search/jql", params=params, auth=_auth(), timeout=30)
+            if resp.status_code == 400:  # un ticket de la liste a été supprimé : on les interroge un par un
+                for key in issue_keys[i:i + 50]:
+                    one = requests.get(f"{_base()}/issue/{key}", params={"fields": "status"},
+                                       auth=_auth(), timeout=30)
+                    if one.ok:
+                        statuses[key] = one.json()["fields"]["status"]["name"]
+                break
+            resp.raise_for_status()
+            body = resp.json()
+            for issue in body["issues"]:
+                statuses[issue["key"]] = issue["fields"]["status"]["name"]
+            token = body.get("nextPageToken")
+            if body.get("isLast", True) or not token:
+                break
+    return statuses
+
+
 def transition_issue(issue_key: str, status: str) -> bool:
     """Passe le ticket dans le statut demandé. False si déjà dans ce statut ou transition impossible."""
     resp = requests.get(f"{_base()}/issue/{issue_key}/transitions", auth=_auth(), timeout=30)
