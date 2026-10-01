@@ -1,3 +1,4 @@
 claude-agent-sdk
 python-dotenv
 mcp-atlassian
+requests
