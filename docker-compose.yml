@@ -3,7 +3,7 @@ services:
     build: .
     env_file: .env
     environment:
-      POLL_INTERVAL: "600"   # relance toutes les 10 min
+      POLL_INTERVAL: "120"   # relance toutes les 2 min
     volumes:
       - ./data:/data
     restart: unless-stopped
