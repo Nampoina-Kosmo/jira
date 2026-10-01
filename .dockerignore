@@ -1,0 +1,6 @@
+.env
+.venv/
+bin/
+data/
+processed.json
+__pycache__/

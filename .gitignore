@@ -1,0 +1,7 @@
+.env
+node_modules/
+.venv/
+processed.json
+bin/
+data/
+__pycache__/

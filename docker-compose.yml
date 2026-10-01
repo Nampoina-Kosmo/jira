@@ -1,0 +1,9 @@
+services:
+  jira-mail-bot:
+    build: .
+    env_file: .env
+    environment:
+      POLL_INTERVAL: "600"   # relance toutes les 10 min
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
