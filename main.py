@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import folders  # noqa: E402  (après load_dotenv)
+from config import DEV_MAILS, MODE  # noqa: E402
 import jira_api  # noqa: E402
 import logos  # noqa: E402
 import jira_to_mail  # noqa: E402
@@ -216,7 +217,8 @@ async def process(mail: dict) -> str:
 
 async def main() -> None:
     mails = fetch_new()
-    print(f"{len(mails)} nouveau(x) mail(s) | dry_run={DRY_RUN}")
+    print(f"{len(mails)} nouveau(x) mail(s) | mode={MODE} | dry_run={DRY_RUN}"
+          + (f" | mails dev={', '.join(DEV_MAILS)}" if MODE == "dev" else ""))
     for mail in mails:
         print(f"\n--- {mail['subject']} ({mail['from']})")
         result = await process(mail)
