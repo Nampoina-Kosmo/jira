@@ -14,6 +14,7 @@ STATUS_FOLDER = {
     "En cours": "01",      # toujours le dossier de Wiem
     "En revue": None,
     "Terminé": "03",
+    "Idée": "04",
 }
 # statuts déjà "satisfaits" par plusieurs dossiers (un mail déjà en 02 n'est pas déplacé vers 01)
 EQUIVALENT = {"01": {"01", "02"}}

@@ -11,6 +11,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from email.header import decode_header, make_header
+from email.utils import parseaddr
 from html import unescape
 from pathlib import Path
 
@@ -23,6 +24,7 @@ import folders  # noqa: E402  (après load_dotenv)
 from config import DEV_MAILS, MODE  # noqa: E402
 import jira_api  # noqa: E402
 import logos  # noqa: E402
+import notify  # noqa: E402
 import jira_to_mail  # noqa: E402
 import state as st  # noqa: E402
 
@@ -75,6 +77,14 @@ def find_claude_cli() -> str | None:
 
 def _decode(value: str | None) -> str:
     return str(make_header(decode_header(value or "")))
+
+
+def _requester(msg: email.message.Message) -> str | None:
+    """Adresse du demandeur (Reply-To sinon From) ; None si c'est notre propre boîte ou un expéditeur automatique."""
+    addr = parseaddr(msg.get("Reply-To") or msg.get("From") or "")[1].lower()
+    if not addr or addr == os.environ["MAIL_USER"].lower() or re.search(r"no-?reply|mailer-daemon", addr):
+        return None
+    return addr
 
 
 def _body(msg: email.message.Message) -> str:
@@ -163,6 +173,7 @@ def fetch_new() -> list[dict]:
             mails.append({
                 "id": mid,
                 "from": _decode(msg.get("From")),
+                "requester": _requester(msg),
                 "subject": _decode(msg.get("Subject")),
                 "date": msg.get("Date", ""),
                 "body": re.sub(r"\n{3,}", "\n\n", _body(msg)).strip()[:MAX_BODY],
@@ -172,7 +183,7 @@ def fetch_new() -> list[dict]:
     return mails
 
 
-def mark_done(mail_id: str, issue_key: str | None) -> None:
+def mark_done(mail_id: str, issue_key: str | None, mail: dict) -> None:
     status = None
     if issue_key:  # statut actuel du ticket, pour détecter ensuite ses changements dans Jira
         try:
@@ -181,6 +192,8 @@ def mark_done(mail_id: str, issue_key: str | None) -> None:
             status = "Nouvelle demande"
     state = st.load()
     state[mail_id] = {"issue_key": issue_key, "status": status}
+    if issue_key and mail["requester"]:  # pour prévenir le demandeur des évolutions du ticket
+        state[mail_id].update(requester=mail["requester"], subject=mail["subject"])
     st.save(state)
 
 
@@ -234,9 +247,10 @@ async def main() -> None:
             except Exception as exc:  # le ticket existe : ne pas le recréer au prochain passage
                 print(f"Pièces jointes non ajoutées : {exc!r}")
         if not DRY_RUN:
-            mark_done(mail["id"], issue_key)
+            mark_done(mail["id"], issue_key, mail)
     folders.sync(DRY_RUN)       # mail -> Jira
     jira_to_mail.sync(DRY_RUN)  # Jira -> mail
+    notify.sync(DRY_RUN)        # prévient les demandeurs
 
 
 if __name__ == "__main__":

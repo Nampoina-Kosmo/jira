@@ -13,6 +13,7 @@ FOLDER_STATUS = {
     "01": "En cours",    # 01 - A traiter par Wiem
     "02": "En cours",    # 02 - A traiter par Philippe
     "03": "Terminé",     # 03 - Traitement terminé
+    "04": "Idée",        # 04 - Idées améliorations à conserver
 }
 
 
