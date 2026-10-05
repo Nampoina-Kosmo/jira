@@ -1,27 +1,60 @@
-"""Outils IMAP pour retrouver un mail par son Message-ID et le déplacer d'un dossier à l'autre."""
+"""Outils IMAP pour retrouver un mail par son Message-ID et le déplacer d'un dossier à l'autre.
+
+Les dossiers de statut portent le même nom que les statuts Jira et sont rangés sous INBOX :
+INBOX/Idée, INBOX/Planifier, INBOX/En cours, INBOX/En revue, INBOX/Terminé.
+Le statut « Nouvelle demande » correspond à INBOX lui-même.
+"""
+import base64
 import imaplib
 import re
+from collections.abc import Iterable
 
-FOLDER_PREFIX = re.compile(r"INBOX[./](\d\d) - ")
+STATUS_FOLDERS = ["Idée", "Planifier", "En cours", "En revue", "Terminé"]
+
+
+def decode_utf7(name: str) -> str:
+    """Décode un nom de dossier IMAP (UTF-7 modifié) : 'Termin&AOk-' -> 'Terminé'."""
+    def repl(m: re.Match) -> str:
+        if not m.group(1):
+            return "&"
+        b64 = m.group(1).replace(",", "/")
+        return base64.b64decode(b64 + "=" * (-len(b64) % 4)).decode("utf-16-be")
+    return re.sub(r"&([^-]*)-", repl, name)
+
+
+def all_folders(imap: imaplib.IMAP4_SSL) -> dict[str, str]:
+    """{nom décodé: nom brut IMAP} de tous les dossiers."""
+    folders = {}
+    for line in imap.list()[1]:
+        name = re.search(r'"([^"]+)"\s*$', line.decode())
+        if name:
+            folders[decode_utf7(name.group(1))] = name.group(1)
+    return folders
 
 
 def folder_map(imap: imaplib.IMAP4_SSL) -> dict[str, str]:
-    """{'INBOX': 'INBOX', '00': 'INBOX/00 - ...', '01': ..., ...}"""
-    folders = {"INBOX": "INBOX"}
-    for line in imap.list()[1]:
-        name = re.search(r'"([^"]+)"\s*$', line.decode())
-        if name and (m := FOLDER_PREFIX.match(name.group(1))):
-            folders[m.group(1)] = name.group(1)
+    """{statut Jira: nom brut du dossier}. 'Nouvelle demande' -> INBOX ; un statut sans dossier est absent."""
+    found = {decoded.split("/", 1)[1].casefold(): raw
+             for decoded, raw in all_folders(imap).items() if decoded.startswith(("INBOX/", "INBOX."))}
+    folders = {"Nouvelle demande": "INBOX"}
+    for status in STATUS_FOLDERS:
+        if status.casefold() in found:
+            folders[status] = found[status.casefold()]
     return folders
+
+
+def search_folders(imap: imaplib.IMAP4_SSL) -> list[str]:
+    """Où chercher un mail : INBOX et tous ses sous-dossiers (y compris les anciens dossiers 00 à 04)."""
+    return ["INBOX"] + [raw for decoded, raw in all_folders(imap).items() if decoded.startswith(("INBOX/", "INBOX."))]
 
 
 def _quote(name: str) -> str:
     return f'"{name}"'
 
 
-def locate(imap: imaplib.IMAP4_SSL, message_id: str, folders: dict[str, str]) -> str | None:
+def locate(imap: imaplib.IMAP4_SSL, message_id: str, folders: Iterable[str]) -> str | None:
     """Nom du dossier qui contient le mail, ou None."""
-    for name in dict.fromkeys(folders.values()):
+    for name in dict.fromkeys(folders):
         imap.select(_quote(name), readonly=True)
         _, data = imap.uid("SEARCH", None, "HEADER", "Message-ID", _quote(message_id))
         if data[0]:

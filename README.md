@@ -29,32 +29,24 @@ Le demandeur et les administrateurs sont prévenus par mail à chaque évolution
 - Un fichier de plus de 10 Mo n'est pas joint : la description l'indique.
 - L'agent ne mentionne que les fichiers réellement joints.
 
-### 5. Mail → Jira (statut selon le dossier)
-Quand un mail est rangé dans un dossier, son ticket change de statut :
+### 5. Dossiers de la boîte = statuts Jira
+La boîte a la même structure que Jira : un dossier par statut, nommé comme le statut et rangé sous `INBOX`.
 
-| Dossier | Statut Jira |
-|---|---|
-| `00 - Message Pris en Compte` | Planifier |
-| `01 - A traiter par Wiem` | En cours |
-| `02 - A traiter par Philippe` | En cours |
-| `03 - Traitement terminé` | Terminé |
-| `04 - Idées améliorations à conserver` | Idée |
-
-Une réponse dans la même conversation est rattachée au même ticket.
-
-### 6. Jira → Mail (dossier selon le statut)
-Quand le statut d'un ticket change dans Jira, le mail est déplacé :
-
-| Statut Jira | Dossier |
+| Statut Jira | Dossier du mail |
 |---|---|
 | Nouvelle demande | `INBOX` |
-| Planifier | `00` |
-| En cours | `01` (Wiem) — un mail déjà en `02` ne bouge pas |
-| En revue | aucun déplacement |
-| Terminé | `03` |
-| Idée | `04` |
+| Idée | `INBOX/Idée` |
+| Planifier | `INBOX/Planifier` |
+| En cours | `INBOX/En cours` |
+| En revue | `INBOX/En revue` |
+| Terminé | `INBOX/Terminé` |
 
-Jira est interrogé à chaque passage (pas en temps réel). Chaque changement n'est appliqué qu'une fois dans un sens ou dans l'autre, pour éviter les boucles.
+Les anciens dossiers `00` à `04` ne sont plus surveillés ; ils servent seulement à retrouver un mail à déplacer.
+
+### 6. Synchronisation dans les deux sens
+- **Mail → Jira** : quand un mail est rangé dans un dossier de statut, son ticket passe dans le statut du même nom. Une réponse dans la même conversation est rattachée au même ticket.
+- **Jira → Mail** : quand le statut d'un ticket change dans Jira, le mail est déplacé dans le dossier du même nom (`INBOX` pour « Nouvelle demande »). Jira est interrogé à chaque passage (pas en temps réel).
+- Chaque changement n'est appliqué qu'une fois dans un sens ou dans l'autre, pour éviter les boucles.
 
 ### 7. Mails automatiques
 - **Au demandeur**, à la création du ticket puis à chaque changement de statut : message poli et professionnel (référence, intitulé, statut, lien vers le ticket). Textes dans `notify.py` (`TEMPLATES`).
@@ -120,7 +112,7 @@ docker compose down            # arrêter
 Pour retester un mail : le remettre en non lu (ou le recevoir depuis moins de 60 min) et retirer son entrée de `data/processed.json`.
 
 ## Limites connues
-- Seuls les mails de `INBOX` donnent lieu à un ticket ; un mail rangé dans un dossier avant d'avoir été lu par le script n'a pas de ticket.
+- Seuls les mails de `INBOX` donnent lieu à un ticket ; un mail rangé dans un dossier de statut avant d'avoir été lu par le script n'a pas de ticket.
 - Seuls les tickets créés depuis le suivi des statuts sont reliés à leur mail.
 - Les numéros de devis du type `DVS-2026-1262` peuvent être transformés en lien par Jira dans la description.
 - Jira est consulté à intervalle régulier : un changement de statut peut mettre jusqu'à `POLL_INTERVAL` secondes à être répercuté.

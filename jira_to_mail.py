@@ -1,23 +1,11 @@
 """Jira -> mail : quand le statut d'un ticket change dans Jira, le mail associé est rangé
-dans le dossier correspondant."""
+dans le dossier du même nom (INBOX pour « Nouvelle demande »)."""
 import imaplib
 import os
 
 import jira_api
 import mail_move
 import state as st
-
-# statut Jira -> préfixe du dossier de destination (None = ne pas déplacer)
-STATUS_FOLDER = {
-    "Nouvelle demande": "INBOX",
-    "Planifier": "00",
-    "En cours": "01",      # toujours le dossier de Wiem
-    "En revue": None,
-    "Terminé": "03",
-    "Idée": "04",
-}
-# statuts déjà "satisfaits" par plusieurs dossiers (un mail déjà en 02 n'est pas déplacé vers 01)
-EQUIVALENT = {"01": {"01", "02"}}
 
 
 def sync(dry_run: bool) -> None:
@@ -49,26 +37,27 @@ def sync(dry_run: bool) -> None:
     changed = False
     with imaplib.IMAP4_SSL(os.environ["IMAP_HOST"], int(os.environ["IMAP_PORT"])) as imap:
         imap.login(os.environ["MAIL_USER"], os.environ["MAIL_PASSWORD"])
-        folders = mail_move.folder_map(imap)
+        folders = mail_move.folder_map(imap)      # {statut: dossier}
+        searchable = mail_move.search_folders(imap)
         for key, mid, status in pending:
-            prefix = STATUS_FOLDER.get(status)
-            if prefix is None:  # statut sans dossier : on mémorise seulement le nouveau statut
+            dst = folders.get(status)
+            if dst is None:  # statut sans dossier : on mémorise seulement le nouveau statut
                 state[mid]["status"] = status
                 changed = True
                 continue
-            src = mail_move.locate(imap, mid, folders)
+            src = mail_move.locate(imap, mid, searchable)
             if src is None:
                 print(f"{key} : mail {mid} introuvable, ignoré")
                 state[mid]["status"] = status
                 changed = True
                 continue
-            wanted = {folders[p] for p in EQUIVALENT.get(prefix, {prefix}) if p in folders}
-            if src not in wanted and prefix in folders:
-                print(f"{key} -> {status} : mail {mid} déplacé de « {src} » vers « {folders[prefix]} »")
+            if src != dst:
+                print(f"{key} -> {status} : mail {mid} déplacé de « {mail_move.decode_utf7(src)} » "
+                      f"vers « {mail_move.decode_utf7(dst)} »")
                 if dry_run:
                     continue
                 try:
-                    if not mail_move.move(imap, mid, src, folders[prefix]):
+                    if not mail_move.move(imap, mid, src, dst):
                         print("Copie refusée, réessai au prochain passage")
                         continue
                 except Exception as exc:

@@ -1,33 +1,16 @@
-"""Synchronise le statut des tickets Jira avec le dossier IMAP dans lequel le mail est rangé."""
+"""Mail -> Jira : le statut du ticket suit le dossier IMAP dans lequel le mail est rangé.
+
+Dossiers surveillés (même nom que le statut Jira, sous INBOX) :
+Idée, Planifier, En cours, En revue, Terminé.
+"""
 import email
 import imaplib
 import os
 import re
 
 import jira_api
+import mail_move
 import state as st
-
-# préfixe du nom de dossier -> statut Jira (le dossier 04 n'a volontairement aucune action)
-FOLDER_STATUS = {
-    "00": "Planifier",   # 00 - Message Pris en Compte
-    "01": "En cours",    # 01 - A traiter par Wiem
-    "02": "En cours",    # 02 - A traiter par Philippe
-    "03": "Terminé",     # 03 - Traitement terminé
-    "04": "Idée",        # 04 - Idées améliorations à conserver
-}
-
-
-def _watched_folders(imap: imaplib.IMAP4_SSL) -> dict[str, str]:
-    folders = {}
-    for line in imap.list()[1]:
-        name = re.search(r'"([^"]+)"\s*$', line.decode())
-        if not name:
-            continue
-        name = name.group(1)
-        m = re.match(r"INBOX[./](\d\d) - ", name)
-        if m and m.group(1) in FOLDER_STATUS:
-            folders[name] = FOLDER_STATUS[m.group(1)]
-    return folders
 
 
 def _headers(imap: imaplib.IMAP4_SSL) -> list[tuple[str, list[str]]]:
@@ -50,7 +33,8 @@ def sync(dry_run: bool) -> None:
     changed = False
     with imaplib.IMAP4_SSL(os.environ["IMAP_HOST"], int(os.environ["IMAP_PORT"])) as imap:
         imap.login(os.environ["MAIL_USER"], os.environ["MAIL_PASSWORD"])
-        for folder, status in _watched_folders(imap).items():
+        watched = {raw: status for status, raw in mail_move.folder_map(imap).items() if raw != "INBOX"}
+        for folder, status in watched.items():
             _, count = imap.select(f'"{folder}"', readonly=True)
             if not int(count[0] or 0):
                 continue
@@ -64,7 +48,7 @@ def sync(dry_run: bool) -> None:
                 )
                 if not key:
                     continue
-                print(f"[{folder}] {mid} -> {key} : {status}")
+                print(f"[{mail_move.decode_utf7(folder)}] {mid} -> {key} : {status}")
                 if dry_run:
                     continue
                 try:
@@ -72,7 +56,7 @@ def sync(dry_run: bool) -> None:
                 except Exception as exc:  # réessayé au prochain passage
                     print(f"Transition échouée pour {key} : {exc!r}")
                     continue
-                state[mid] = {"issue_key": key, "status": status}
+                state.setdefault(mid, {}).update(issue_key=key, status=status)  # garde demandeur et objet
                 changed = True
     if changed:
         st.save(state)
